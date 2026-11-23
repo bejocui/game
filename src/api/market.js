@@ -1,1 +1,71 @@
-export default async function handler(req,res){res.setHeader('Cache-Control','s-maxage=45, stale-while-revalidate=30');const raw=String(req.query.symbols||'^JKSE,BBCA.JK,BBRI.JK').split(',').slice(0,35);const symbols=Array.from(new Set(raw.map(s=>s.trim()).filter(s=>/^\^?[A-Z0-9.-]{1,18}$/.test(s))));const quotes={};let history=[];await Promise.all(symbols.map(async s=>{try{const r=await fetch('https://query1.finance.yahoo.com/v8/finance/chart/'+encodeURIComponent(s)+'?range=1y&interval=1d',{headers:{'User-Agent':'Mozilla/5.0'},signal:AbortSignal.timeout(15000)});if(!r.ok)throw Error('Yahoo Finance HTTP '+r.status);const j=await r.json(),v=j.chart&&j.chart.result&&j.chart.result[0];if(!v)throw Error('No quote data');const m=v.meta||{},q=(v.indicators&&v.indicators.quote&&v.indicators.quote[0])||{},c=q.close||[],t=v.timestamp||[],valid=c.filter(Number.isFinite),i=c.length-1;const price=Number(m.regularMarketPrice??valid[valid.length-1]),prev=Number(m.chartPreviousClose??m.previousClose??valid[valid.length-2]),h=t.map((x,k)=>({time:x*1000,close:c[k]})).filter(x=>Number.isFinite(x.close));quotes[s]={symbol:s,name:m.longName||m.shortName||s,price,previousClose:prev,change:price-prev,changePct:prev?(price-prev)/prev*100:0,open:q.open?q.open[i]:null,high:q.high?q.high[i]:null,low:q.low?q.low[i]:null,volume:q.volume?q.volume[i]:null,marketTime:m.regularMarketTime?m.regularMarketTime*1000:null,history:h};if(s==='^JKSE')history=h}catch(e){quotes[s]={symbol:s,error:String(e.message||e)������q�^���
+export default async function handler(req, res) {
+  res.setHeader('Cache-Control', 's-maxage=45, stale-while-revalidate=30');
+  const raw = String((req.query && req.query.symbols) || '^JKSE,BBCA.JK,BBRI.JK').split(',').slice(0, 35);
+  const symbols = Array.from(new Set(raw.map(s => s.trim()).filter(s => /^\^?[A-Z0-9.-]{1,18}$/.test(s))));
+  const quotes = {};
+  let history = [];
+
+  await Promise.all(symbols.map(async (symbol) => {
+    try {
+      const url = 'https://query1.finance.yahoo.com/v8/finance/chart/' +
+        encodeURIComponent(symbol) + '?range=1y&interval=1d';
+      const response = await fetch(url, {
+        headers: { 'User-Agent': 'Mozilla/5.0' },
+        signal: AbortSignal.timeout(12000)
+      });
+      if (!response.ok) throw new Error('Yahoo Finance HTTP ' + response.status);
+
+      const payload = await response.json();
+      const result = payload && payload.chart && payload.chart.result && payload.chart.result[0];
+      if (!result) {
+        const message = payload && payload.chart && payload.chart.error && payload.chart.error.description;
+        throw new Error(message || 'Yahoo Finance tidak mengembalikan data');
+      }
+
+      const meta = result.meta || {};
+      const quote = (result.indicators && result.indicators.quote && result.indicators.quote[0]) || {};
+      const closes = quote.close || [];
+      const timestamps = result.timestamp || [];
+      const valid = closes.filter(Number.isFinite);
+      if (!valid.length) throw new Error('Data harga IHSG kosong');
+
+      const last = valid[valid.length - 1];
+      const previous = valid.length > 1 ? valid[valid.length - 2] : last;
+      const price = Number.isFinite(Number(meta.regularMarketPrice)) ? Number(meta.regularMarketPrice) : last;
+      const previousClose = Number.isFinite(Number(meta.chartPreviousClose))
+        ? Number(meta.chartPreviousClose)
+        : (Number.isFinite(Number(meta.previousClose)) ? Number(meta.previousClose) : previous);
+      const points = timestamps.map((time, index) => ({
+        time: time * 1000,
+        close: closes[index]
+      })).filter(point => Number.isFinite(point.close));
+
+      quotes[symbol] = {
+        symbol,
+        name: meta.longName || meta.shortName || symbol,
+        price,
+        previousClose,
+        change: price - previousClose,
+        changePct: previousClose ? ((price - previousClose) / previousClose) * 100 : 0,
+        open: quote.open && quote.open.length ? quote.open[quote.open.length - 1] : null,
+        high: quote.high && quote.high.length ? quote.high[quote.high.length - 1] : null,
+        low: quote.low && quote.low.length ? quote.low[quote.low.length - 1] : null,
+        volume: quote.volume && quote.volume.length ? quote.volume[quote.volume.length - 1] : null,
+        marketTime: meta.regularMarketTime ? meta.regularMarketTime * 1000 : null,
+        currency: meta.currency || 'IDR',
+        history: points
+      };
+      if (symbol === '^JKSE') history = points;
+    } catch (error) {
+      quotes[symbol] = { symbol, error: String(error && error.message || error) };
+    }
+  }));
+
+  const hasData = Object.values(quotes).some(item => Number.isFinite(item.price));
+  res.status(hasData ? 200 : 502).json({
+    quotes,
+    history,
+    source: 'Yahoo Finance',
+    asOf: new Date().toISOString()
+  });
+}
