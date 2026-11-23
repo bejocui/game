@@ -1,0 +1,39 @@
+<!doctype html>
+<html lang="id">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Global Market Monitor</title>
+<style>
+html,body{margin:0;min-height:100%;font-family:Inter,Arial,sans-serif;background:#f4f7fb;color:#172437}
+#boot{max-width:760px;margin:15vh auto;padding:24px;text-align:center}
+#boot small{color:#64748b}
+</style>
+</head>
+<body>
+<div id="boot"><h2>Global Market Monitor</h2><p>Memuat dashboard…</p><small>Menyiapkan tampilan dan data pasar.</small></div>
+<script>
+(async function(){
+  const base="https://raw.githubusercontent.com/bejocui/game/main/page-chunks/";
+  const names=["part-01.txt","part-02.txt","part-03.txt","part-04.txt","part-05.txt","part-06.txt","part-07.txt","part-08.txt","part-09.txt"];
+  const parts=await Promise.all(names.map(async name=>{
+    const r=await fetch(base+name,{cache:"no-store"});
+    if(!r.ok) throw new Error("Gagal mengambil file dashboard: "+name+" ("+r.status+")");
+    return (await r.text()).trim();
+  }));
+  const b64=parts.join("");
+  const binary=atob(b64);
+  const bytes=new Uint8Array(binary.length);
+  for(let i=0;i<binary.length;i++) bytes[i]=binary.charCodeAt(i);
+  if(typeof DecompressionStream==="undefined") throw new Error("Browser belum mendukung pemuatan dashboard.");
+  const stream=new Blob([bytes]).stream().pipeThrough(new DecompressionStream("gzip"));
+  const page=await new Response(stream).text();
+  document.open();
+  document.write(page);
+  document.close();
+})().catch(error=>{
+  document.getElementById("boot").innerHTML="<h2>Dashboard belum dapat dimuat</h2><p>"+String(error.message)+"</p><p>Silakan refresh beberapa saat lagi.</p>";
+});
+</script>
+</body>
+</html>
